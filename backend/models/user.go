@@ -13,7 +13,7 @@ type User struct {
 	Name         string    `gorm:"size:255;not null" json:"name" binding:"required"`
 	Email        string    `gorm:"size:255;not null;unique" json:"email" binding:"required,email"`
 	Password     string    `gorm:"-" json:"password,omitempty" binding:"omitempty,min=8"` // omitempty para edição, min=8 para criação
-	PasswordHash string    `gorm:"not null" json:"password_hash"`
+	PasswordHash string    `gorm:"not null" json:"-"`
 	CreatedAt    time.Time `gorm:"not null" json:"created_at"`
 	UpdatedAt    time.Time `gorm:"not null" json:"updated_at"`
 }
