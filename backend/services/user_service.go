@@ -36,6 +36,15 @@ func GetUserByID(id uuid.UUID) (models.User, error) {
 
 // UpdateUser atualiza os dados de um usuário existente.
 func UpdateUser(user *models.User, id uuid.UUID) error {
+	if user.Password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		user.PasswordHash = string(hashedPassword)
+		user.Password = "" // Limpa a senha em texto plano
+	}
+
 	result := database.DB.Model(&models.User{}).Where("id = ?", id).Updates(user)
 	return result.Error
 }

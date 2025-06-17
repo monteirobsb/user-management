@@ -19,7 +19,6 @@ func CreateUserHandler(c *gin.Context) {
 
 	// Simplificação: A senha deveria ser recebida em um campo separado e hasheada aqui.
 	// Por enquanto, estamos apenas simulando.
-	user.PasswordHash = "hashed_password_placeholder"
 
 	if err := services.CreateUser(&user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Erro ao criar usuário"})
