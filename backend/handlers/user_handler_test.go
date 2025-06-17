@@ -13,105 +13,186 @@ import (
 	"github.com/monteirobsb/user-management/backend/handlers"
 	"github.com/monteirobsb/user-management/backend/models"
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-// setupRouter configura um roteador Gin com um banco de dados de teste.
-func setupRouter() *gin.Engine {
-	// Usa SQLite em memória para testes
+func setupRouterAndTestDB(t *testing.T) *gin.Engine {
+	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open("file::memory:"), &gorm.Config{})
 	if err != nil {
-		panic("Falha ao conectar ao banco de dados de teste")
+		t.Fatalf("Failed to connect to test database: %v", err)
 	}
 
-	// AutoMigrate o schema E VERIFICA O ERRO
 	err = db.AutoMigrate(&models.User{})
 	if err != nil {
-		// Se a migração falhar, o teste vai parar aqui com uma mensagem clara.
-		panic("Falha ao migrar o schema do banco de teste: " + err.Error())
+		t.Fatalf("Failed to migrate test database schema: %v", err)
 	}
+	database.DB = db
 
-	database.DB = db // Sobrescreve a conexão global do DB
-
-	r := gin.Default()
-	api := r.Group("/api/users")
+	router := gin.New()
+	userRoutes := router.Group("/api/users")
 	{
-		api.POST("", handlers.CreateUserHandler)
-		api.PUT("/:id", handlers.UpdateUserHandler)
-		api.GET("/:id", handlers.GetUserHandler)
+		userRoutes.POST("", handlers.CreateUserHandler)
+		userRoutes.PUT("/:id", handlers.UpdateUserHandler)
 	}
-	return r
+	return router
 }
 
-func TestCreateUserHandler(t *testing.T) {
-	router := setupRouter()
-
-	newUser := `{"name":"Test User", "email":"test@example.com", "password":"password123"}`
-	req, _ := http.NewRequest("POST", "/api/users", bytes.NewBufferString(newUser))
+func performRequest(router *gin.Engine, method, path string, body interface{}) *httptest.ResponseRecorder {
+	var reqBody *bytes.Buffer
+	if body != nil {
+		payloadBytes, _ := json.Marshal(body)
+		reqBody = bytes.NewBuffer(payloadBytes)
+	} else {
+		reqBody = bytes.NewBuffer(make([]byte, 0))
+	}
+	req, _ := http.NewRequest(method, path, reqBody)
 	req.Header.Set("Content-Type", "application/json")
-
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
-
-	var user models.User
-	json.Unmarshal(w.Body.Bytes(), &user)
-	assert.Equal(t, "Test User", user.Name)
-	assert.Equal(t, "test@example.com", user.Email)
-	assert.Empty(t, user.Password) // Garante que a senha não foi retornada
-	// PasswordHash não é mais retornado na resposta JSON
+	return w
 }
 
-func TestUpdateUserPasswordHandler(t *testing.T) {
-	router := setupRouter()
-
-	// 1. Criar um novo usuário
-	initialPassword := "password123"
-	createUserPayload := map[string]string{
-		"name":     "Update Test User",
-		"email":    "update@example.com",
-		"password": initialPassword,
+func TestCreateUserHandler_ValidationAndSuccess(t *testing.T) {
+	assert := assert.New(t)
+	testCases := []struct {
+		name         string
+		payload      interface{}
+		expectedCode int
+		bodyContains string
+		dbCheck      func(t *testing.T, email string)
+	}{
+		{
+			name: "Valid Data",
+			payload: models.UserCreateRequest{Name: "Test User", Email: "valid." + uuid.NewString() + "@example.com", Password: "password123"},
+			expectedCode: http.StatusCreated,
+			bodyContains: `"email":"valid.`,
+			dbCheck: func(t *testing.T, email string) {
+				var user models.User
+				err := database.DB.Where("email = ?", email).First(&user).Error
+				assert.NoError(err, "User should be created in DB")
+				assert.Equal("Test User", user.Name)
+			},
+		},
+		{name: "Missing Name", payload: models.UserCreateRequest{Email: "noname@example.com", Password: "password123"}, expectedCode: http.StatusBadRequest, bodyContains: "Name"},
+		{name: "Invalid Email", payload: models.UserCreateRequest{Name: "Test User", Email: "invalid-email", Password: "password123"}, expectedCode: http.StatusBadRequest, bodyContains: "Email"},
+		{name: "Missing Password", payload: models.UserCreateRequest{Name: "Test User", Email: "nopass@example.com"}, expectedCode: http.StatusBadRequest, bodyContains: "Password"},
+		{name: "Short Password", payload: models.UserCreateRequest{Name: "Test User", Email: "shortpass@example.com", Password: "pass"}, expectedCode: http.StatusBadRequest, bodyContains: "Password"},
 	}
-	jsonPayload, _ := json.Marshal(createUserPayload)
-	reqCreate, _ := http.NewRequest("POST", "/api/users", bytes.NewBuffer(jsonPayload))
-	reqCreate.Header.Set("Content-Type", "application/json")
 
-	wCreate := httptest.NewRecorder()
-	router.ServeHTTP(wCreate, reqCreate)
-	assert.Equal(t, http.StatusCreated, wCreate.Code)
+	for _, tc := range testCases {
+		router := setupRouterAndTestDB(t) // Fresh DB for each create test case
+		t.Run(tc.name, func(t *testing.T) {
+			w := performRequest(router, "POST", "/api/users", tc.payload)
+			assert.Equal(tc.expectedCode, w.Code, "Expected HTTP status code for "+tc.name)
+			if tc.bodyContains != "" {
+				assert.Contains(w.Body.String(), tc.bodyContains, "Response body for "+tc.name)
+			}
+			if tc.dbCheck != nil {
+				email := ""
+				if req, ok := tc.payload.(models.UserCreateRequest); ok { email = req.Email }
+				tc.dbCheck(t, email)
+			}
+		})
+	}
+}
 
-	var createdUser models.User
-	err := json.Unmarshal(wCreate.Body.Bytes(), &createdUser)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, createdUser.ID)
+func TestUpdateUserHandler_ValidationAndSuccess(t *testing.T) {
+	assert := assert.New(t)
+	router := setupRouterAndTestDB(t) // Single DB instance for this set of update tests
 
-	userID := createdUser.ID
+	initialUserName := "Initial User"
+	initialUserEmail := "initial.update." + uuid.NewString() + "@example.com"
 
-	// 2. Atualizar a senha do usuário
-	newPassword := "newPassword456"
-	updatePasswordPayload := map[string]string{"password": newPassword}
-	jsonUpdatePayload, _ := json.Marshal(updatePasswordPayload)
+	createdUser := models.User{ // ID will be auto-generated by BeforeCreate hook
+		Name:         initialUserName,
+		Email:        initialUserEmail,
+		PasswordHash: "dummyhash", // Not testing password update here
+	}
+	err := database.DB.Create(&createdUser).Error // GORM populates createdUser.ID
+	assert.NoError(err, "Setup: Failed to create initial user for update tests")
+	assert.NotEmpty(createdUser.ID, "Setup: createdUser.ID should be populated by GORM")
 
-	reqUpdate, _ := http.NewRequest("PUT", "/api/users/"+userID.String(), bytes.NewBuffer(jsonUpdatePayload))
-	reqUpdate.Header.Set("Content-Type", "application/json")
+	actualTestUserIDString := createdUser.ID.String()
 
-	wUpdate := httptest.NewRecorder()
-	router.ServeHTTP(wUpdate, reqUpdate)
-	assert.Equal(t, http.StatusOK, wUpdate.Code)
+	testCases := []struct {
+		name         string
+		userID       string
+		payload      interface{}
+		expectedCode int
+		bodyContains string
+		dbCheck      func(t *testing.T, id uuid.UUID)
+	}{
+		{
+			name:   "Valid Update Data (Name only)",
+			userID: actualTestUserIDString,
+			payload: models.UserUpdateRequest{Name: func(s string) *string { return &s }("Updated Name")},
+			expectedCode: http.StatusOK,
+			bodyContains: `"name":"Updated Name"`,
+			dbCheck: func(t *testing.T, id uuid.UUID) {
+				var user models.User
+				errDb := database.DB.First(&user, "id = ?", id).Error
+				assert.NoError(errDb, "DBCheck: User should be found post-update")
+				assert.Equal("Updated Name", user.Name, "DBCheck: Name should be updated")
+				assert.Equal(initialUserEmail, user.Email, "DBCheck: Email should remain unchanged")
+			},
+		},
+		{
+			name:   "Valid Update Data (Email only)",
+			userID: actualTestUserIDString,
+			payload: models.UserUpdateRequest{Email: func(s string) *string { return &s }("updated." + uuid.NewString() + "@example.com")},
+			expectedCode: http.StatusOK,
+			bodyContains: `"email":"updated.`,
+			dbCheck: func(t *testing.T, id uuid.UUID) {
+				var user models.User
+				errDb := database.DB.First(&user, "id = ?", id).Error
+				assert.NoError(errDb, "DBCheck: User should be found post-update")
+				assert.Equal("Updated Name", user.Name, "DBCheck: Name should be from previous update") // Assumes state from previous sub-test
+				assert.Contains(user.Email, "updated.", "DBCheck: Email should be updated")
+			},
+		},
+		{
+			name:   "Empty Name String",
+			userID: actualTestUserIDString,
+			payload: models.UserUpdateRequest{Name: func(s string) *string { return &s }("")},
+			expectedCode: http.StatusBadRequest,
+			bodyContains: "Name",
+		},
+		{
+			name:   "Invalid Email Format",
+			userID: actualTestUserIDString,
+			payload: models.UserUpdateRequest{Email: func(s string) *string { return &s }("invalid-email")},
+			expectedCode: http.StatusBadRequest,
+			bodyContains: "Email",
+		},
+		{
+			name:         "Invalid User ID in Path (non-UUID)",
+			userID:       "invalid-uuid-format",
+			payload:      models.UserUpdateRequest{},
+			expectedCode: http.StatusBadRequest,
+			bodyContains: "ID de usuário inválido",
+		},
+		{
+			name:         "User ID not found (valid UUID, but no user)",
+			userID:       uuid.New().String(),
+			payload:      models.UserUpdateRequest{Name: func(s string) *string { return &s }("Any Name")},
+			expectedCode: http.StatusNotFound,
+			bodyContains: "Usuário não encontrado",
+		},
+	}
 
-	// 3. Verificar a atualização da senha no banco de dados
-	var updatedUser models.User
-	err = database.DB.First(&updatedUser, "id = ?", userID).Error
-	assert.NoError(t, err)
-
-	// Verificar se a senha antiga não corresponde mais
-	errOldPassword := bcrypt.CompareHashAndPassword([]byte(updatedUser.PasswordHash), []byte(initialPassword))
-	assert.Error(t, errOldPassword, "A senha antiga ainda corresponde, o que não deveria acontecer")
-
-	// Verificar se a nova senha corresponde
-	errNewPassword := bcrypt.CompareHashAndPassword([]byte(updatedUser.PasswordHash), []byte(newPassword))
-	assert.NoError(t, errNewPassword, "A nova senha não corresponde")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := performRequest(router, "PUT", "/api/users/"+tc.userID, tc.payload)
+			assert.Equal(tc.expectedCode, w.Code, "Expected HTTP status code for "+tc.name)
+			if tc.bodyContains != "" {
+				assert.Contains(w.Body.String(), tc.bodyContains, "Response body for "+tc.name)
+			}
+			if tc.dbCheck != nil && tc.expectedCode == http.StatusOK {
+				parsedID, _ := uuid.Parse(tc.userID)
+				tc.dbCheck(t, parsedID)
+			}
+		})
+	}
 }

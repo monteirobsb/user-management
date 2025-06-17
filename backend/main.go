@@ -12,22 +12,28 @@ import (
 	"github.com/monteirobsb/user-management/backend/middleware"
 )
 
-// ... (definição do handler de login)
+// LoginPayload define a estrutura esperada para o corpo da requisição de login.
 type LoginPayload struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
 }
 
+// LoginHandler processa as requisições de login.
 func LoginHandler(c *gin.Context) {
 	var payload LoginPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(400, gin.H{"error": "Payload inválido"})
+		// O ErrorHandler middleware pode capturar isso se c.Error(err) for usado,
+		// ou podemos retornar um JSON específico aqui.
+		// Para consistência com validações de UserCreateRequest, o erro de ShouldBindJSON é informativo.
+		c.JSON(400, gin.H{"error": "Payload inválido ou dados ausentes", "details": err.Error()})
 		return
 	}
 
 	token, err := auth.LoginUser(payload.Email, payload.Password)
 	if err != nil {
-		c.JSON(401, gin.H{"error": err.Error()})
+		// auth.LoginUser já loga os erros internos.
+		// Retorna uma mensagem genérica para o cliente.
+		c.JSON(401, gin.H{"error": err.Error()}) // err.Error() de LoginUser é "usuário não encontrado..." ou similar
 		return
 	}
 
@@ -36,18 +42,24 @@ func LoginHandler(c *gin.Context) {
 
 func main() {
 	// Carrega as variáveis de ambiente do arquivo .env
-	err := godotenv.Load("../.env")
-	if err != nil {
-		log.Println("Aviso: Não foi possível encontrar o arquivo .env, usando variáveis de ambiente do sistema.")
+	// É útil logar se o .env foi carregado ou não, especialmente para desenvolvimento.
+	if err := godotenv.Load("../.env"); err != nil {
+		log.Print("WARN: Não foi possível carregar o arquivo .env. Usando variáveis de ambiente do sistema, se definidas.")
+	} else {
+		log.Print("INFO: Arquivo .env carregado com sucesso.")
 	}
 
-	// Inicializa o banco de dados
+	// Inicializa o banco de dados.
+	// InitDatabase agora usa log.Fatal em caso de erro, então não precisamos checar erro aqui.
 	database.InitDatabase()
 
 	// Inicia o roteador Gin
+	// gin.Default() já vem com os middlewares Logger e Recovery.
 	router := gin.Default()
 
-	// Adiciona o Error Handler globalmente
+	// Adiciona o Error Handler globalmente. Este deve vir depois de outros middlewares
+	// se quisermos que ele capture erros deles, ou no início se for para uso geral.
+	// Para capturar erros de rota/handler, esta posição é boa.
 	router.Use(middleware.ErrorHandler())
 
 	// Agrupa as rotas da API sob o prefixo /api
@@ -55,12 +67,14 @@ func main() {
 	{
 		// Rotas públicas
 		api.POST("/login", LoginHandler)
-		api.POST("/users", handlers.CreateUserHandler) // <-- ROTA DE CRIAÇÃO AGORA É PÚBLICA
+		// A rota de criação de usuário deve ser pública para permitir o registro de novos usuários.
+		api.POST("/users", handlers.CreateUserHandler)
 
 		// Rotas protegidas
-		protected := api.Group("/users").Use(middleware.AuthMiddleware())
+		// O middleware AuthMiddleware() será aplicado a este grupo.
+		protected := api.Group("/users")
+		protected.Use(middleware.AuthMiddleware())
 		{
-			// A rota POST foi removida daqui
 			protected.GET("", handlers.GetUsersHandler)
 			protected.GET("/:id", handlers.GetUserHandler)
 			protected.PUT("/:id", handlers.UpdateUserHandler)
@@ -72,6 +86,11 @@ func main() {
 	port := os.Getenv("API_PORT")
 	if port == "" {
 		port = "8080" // Porta padrão
+		log.Printf("INFO: API_PORT não definida, usando porta padrão %s", port)
 	}
-	router.Run(":" + port)
+
+	log.Printf("INFO: Servidor Gin iniciando na porta :%s", port)
+	if err := router.Run(":" + port); err != nil {
+		log.Fatalf("CRITICAL: Falha ao iniciar o servidor Gin: %v", err)
+	}
 }

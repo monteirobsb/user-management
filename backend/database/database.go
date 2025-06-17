@@ -1,7 +1,6 @@
 package database
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -14,21 +13,23 @@ import (
 var DB *gorm.DB
 
 // InitDatabase inicializa a conexão com o banco de dados e executa as migrações.
-func InitDatabase() error {
+// Em caso de falha crítica na configuração ou conexão, esta função chamará log.Fatal.
+func InitDatabase() { // Alterado para não retornar erro, pois usará log.Fatal
 	host := os.Getenv("DATABASE_HOST")
 	user := os.Getenv("POSTGRES_USER")
 	password := os.Getenv("POSTGRES_PASSWORD")
 	dbname := os.Getenv("POSTGRES_DB")
 	port := os.Getenv("DATABASE_PORT")
-	sslmode := os.Getenv("DATABASE_SSLMODE") // Permitir configuração do sslmode
+	sslmode := os.Getenv("DATABASE_SSLMODE")
 
 	if sslmode == "" {
-		sslmode = "disable" // Padrão para desenvolvimento; considere "require" ou "verify-full" para produção
+		sslmode = "disable" // Padrão para desenvolvimento
+		log.Print("INFO: DATABASE_SSLMODE não definido, usando 'disable' como padrão.")
 	}
 
 	// Verifica se as variáveis essenciais não estão vazias
 	if host == "" || user == "" || password == "" || dbname == "" || port == "" {
-		return errors.New("variáveis de ambiente do banco de dados não estão completamente definidas")
+		log.Fatal("CRITICAL: Variáveis de ambiente do banco de dados não estão completamente definidas. A aplicação não pode iniciar.")
 	}
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
@@ -38,16 +39,15 @@ func InitDatabase() error {
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return fmt.Errorf("falha ao conectar ao banco de dados: %w", err)
+		log.Fatalf("CRITICAL: Falha ao conectar ao banco de dados (%s). Verifique as credenciais e a disponibilidade do BD. Erro: %v. A aplicação não pode iniciar.", dsn, err)
 	}
 
-	log.Println("Conexão com o banco de dados estabelecida com sucesso.")
+	log.Print("INFO: Conexão com o banco de dados estabelecida com sucesso.")
 
-	// AutoMigrate
+	log.Print("INFO: Iniciando migração do schema do banco de dados...")
 	err = DB.AutoMigrate(&models.User{})
 	if err != nil {
-		return fmt.Errorf("falha ao migrar o schema do banco de dados: %w", err)
+		log.Fatalf("CRITICAL: Falha ao migrar o schema do banco de dados: %v. A aplicação não pode iniciar.", err)
 	}
-	log.Println("Schema do banco de dados migrado com sucesso.")
-	return nil
+	log.Print("INFO: Schema do banco de dados migrado com sucesso.")
 }
