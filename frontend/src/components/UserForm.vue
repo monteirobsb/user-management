@@ -54,10 +54,23 @@ const formTitle = computed(() => (props.userToEdit ? 'Editar Usuário' : 'Criar 
 
 // Observa mudanças no prop para preencher o formulário para edição
 watch(() => props.userToEdit, (newUser) => {
-  if (newUser) {
-    formData.value = { ...newUser };
+  if (newUser && newUser.id) { // Check for newUser.id to confirm it's an existing user
+    formData.value = {
+      id: newUser.id,
+      name: newUser.name,
+      email: newUser.email,
+      password: '', // Password field is not for editing existing user's password here
+    };
+    isEditing.value = true;
   } else {
-    formData.value = { id: null, name: '', email: '' };
+    // Novo usuário ou formulário limpo
+    formData.value = {
+      id: null,
+      name: '',
+      email: '',
+      password: '', // Inicializa o campo de senha para novos usuários
+    };
+    isEditing.value = false;
   }
 }, { immediate: true });
 
