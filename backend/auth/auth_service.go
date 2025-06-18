@@ -3,10 +3,10 @@ package auth
 import (
 	"errors"
 	"log"
-	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/monteirobsb/user-management/backend/config" // Import the new config package
 	"github.com/monteirobsb/user-management/backend/database"
 	"github.com/monteirobsb/user-management/backend/models"
 	"golang.org/x/crypto/bcrypt"
@@ -18,16 +18,13 @@ var jwtKey []byte
 // init é chamada automaticamente quando o pacote é inicializado.
 // Verifica a configuração da JWT_SECRET_KEY.
 func init() {
-	secret := os.Getenv("JWT_SECRET_KEY")
-	if secret == "" {
-		log.Fatal("CRÍTICO: JWT_SECRET_KEY não está configurada. A aplicação não pode iniciar sem esta chave.")
-	}
-	jwtKey = []byte(secret)
+	// JWTSecretKey is now loaded by the config package and checked there.
+	// If it's empty, LoadConfig would have called log.Fatal.
+	jwtKey = []byte(config.Config.JWTSecretKey)
 }
 
-// tokenDuration define o tempo de expiração do token.
-// Idealmente, este valor viria de uma configuração (ex: variável de ambiente).
-const tokenDuration = 24 * time.Hour
+// tokenDuration is now managed by config.Config.JWTExpirationMinutes
+// const tokenDuration = 24 * time.Hour
 const errorInvalidCredentials = "usuário não encontrado ou credenciais inválidas"
 
 type Claims struct {
@@ -65,7 +62,7 @@ func LoginUser(email, password string) (string, error) {
 		return "", errors.New(errorInvalidCredentials) // Mesma mensagem para evitar enumeração de usuários
 	}
 
-	expirationTime := time.Now().Add(tokenDuration)
+	expirationTime := time.Now().Add(config.Config.JWTExpirationMinutes) // Use JWTExpirationMinutes from config
 	claims := &Claims{
 		UserID: user.ID.String(),
 		RegisteredClaims: jwt.RegisteredClaims{

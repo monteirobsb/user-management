@@ -3,8 +3,8 @@ package database
 import (
 	"fmt"
 	"log"
-	"os"
 
+	"github.com/monteirobsb/user-management/backend/config" // Import the new config package
 	"github.com/monteirobsb/user-management/backend/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -15,25 +15,16 @@ var DB *gorm.DB
 // InitDatabase inicializa a conexão com o banco de dados e executa as migrações.
 // Em caso de falha crítica na configuração ou conexão, esta função chamará log.Fatal.
 func InitDatabase() { // Alterado para não retornar erro, pois usará log.Fatal
-	host := os.Getenv("DATABASE_HOST")
-	user := os.Getenv("POSTGRES_USER")
-	password := os.Getenv("POSTGRES_PASSWORD")
-	dbname := os.Getenv("POSTGRES_DB")
-	port := os.Getenv("DATABASE_PORT")
-	sslmode := os.Getenv("DATABASE_SSLMODE")
-
-	if sslmode == "" {
-		sslmode = "disable" // Padrão para desenvolvimento
-		log.Print("INFO: DATABASE_SSLMODE não definido, usando 'disable' como padrão.")
-	}
-
-	// Verifica se as variáveis essenciais não estão vazias
-	if host == "" || user == "" || password == "" || dbname == "" || port == "" {
-		log.Fatal("CRITICAL: Variáveis de ambiente do banco de dados não estão completamente definidas. A aplicação não pode iniciar.")
-	}
+	// Configuration is now loaded from config.Config
+	// Checks for empty essential variables are done in config.LoadConfig()
 
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=UTC",
-		host, user, password, dbname, port, sslmode,
+		config.Config.DatabaseHost,
+		config.Config.PostgresUser,
+		config.Config.PostgresPassword,
+		config.Config.PostgresDB,
+		config.Config.DatabasePort,
+		config.Config.DatabaseSSLMode,
 	)
 
 	var err error

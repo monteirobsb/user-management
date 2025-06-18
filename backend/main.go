@@ -2,11 +2,11 @@ package main
 
 import (
 	"log"
-	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
+	// "github.com/joho/godotenv" // Removed, as config now handles .env loading
 	"github.com/monteirobsb/user-management/backend/auth"
+	"github.com/monteirobsb/user-management/backend/config" // Import the new config package
 	"github.com/monteirobsb/user-management/backend/database"
 	"github.com/monteirobsb/user-management/backend/handlers"
 	"github.com/monteirobsb/user-management/backend/middleware"
@@ -41,16 +41,16 @@ func LoginHandler(c *gin.Context) {
 }
 
 func main() {
-	// Carrega as variáveis de ambiente do arquivo .env
-	// É útil logar se o .env foi carregado ou não, especialmente para desenvolvimento.
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Print("WARN: Não foi possível carregar o arquivo .env. Usando variáveis de ambiente do sistema, se definidas.")
-	} else {
-		log.Print("INFO: Arquivo .env carregado com sucesso.")
-	}
+	// godotenv.Load is now called within config.LoadConfig()
+	// if err := godotenv.Load("../.env"); err != nil {
+	// 	log.Print("WARN: Não foi possível carregar o arquivo .env. Usando variáveis de ambiente do sistema, se definidas.")
+	// } else {
+	// 	log.Print("INFO: Arquivo .env carregado com sucesso.")
+	// }
 
 	// Inicializa o banco de dados.
 	// InitDatabase agora usa log.Fatal em caso de erro, então não precisamos checar erro aqui.
+	// Config is loaded by its init function, so database.InitDatabase() can use it.
 	database.InitDatabase()
 
 	// Inicia o roteador Gin
@@ -83,14 +83,9 @@ func main() {
 	}
 
 	// Inicia o servidor na porta definida
-	port := os.Getenv("API_PORT")
-	if port == "" {
-		port = "8080" // Porta padrão
-		log.Printf("INFO: API_PORT não definida, usando porta padrão %s", port)
-	}
-
-	log.Printf("INFO: Servidor Gin iniciando na porta :%s", port)
-	if err := router.Run(":" + port); err != nil {
+	// Use APIPort from the config package
+	log.Printf("INFO: Servidor Gin iniciando na porta :%s", config.Config.APIPort)
+	if err := router.Run(":" + config.Config.APIPort); err != nil {
 		log.Fatalf("CRITICAL: Falha ao iniciar o servidor Gin: %v", err)
 	}
 }

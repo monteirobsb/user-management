@@ -10,7 +10,9 @@
         <label for="password">Senha</label>
         <input type="password" v-model="password" required />
       </div>
-      <p v-if="error" class="error">{{ error }}</p>
+      <!-- Display login error from authStore -->
+      <p v-if="authStore.loginError" class="error-message" style="color: red;">{{ authStore.loginError }}</p>
+      <p v-if="error && !authStore.loginError" class="error">{{ error }}</p> <!-- Keep local error for other potential issues if needed, but prioritize store error -->
       <button type="submit">Entrar</button>
     </form>
   </div>
@@ -18,35 +20,44 @@
 
 <script setup>
 import { ref } from 'vue';
-import { useAuthStore } from '@/stores/authStore';
+import { useAuthStore } from '@/stores/authStore'; // Already here, good.
 import { useRouter } from 'vue-router';
 
 const email = ref('');
 const password = ref('');
-const error = ref(null);
-const authStore = useAuthStore();
-// O router é inicializado aqui, no escopo correto do setup.
+const error = ref(null); // Local error state for non-auth related issues, if any.
+const authStore = useAuthStore(); // Get instance of the auth store.
 const router = useRouter();
 
 const handleLogin = async () => {
-  error.value = null; // Limpa erros anteriores
+  error.value = null; // Limpa erros locais anteriores
+  // authStore.loginError is reset inside the action itself.
   try {
-    // Espera a action da store ser concluída
     await authStore.login({ email: email.value, password: password.value });
-    
-    // Se a linha acima não gerou erro, o login foi bem-sucedido.
-    // AGORA sim fazemos o redirecionamento.
-    router.push('/');
-
+    // Navigation is handled by the store now on successful login.
+    // router.push('/'); // This line can be removed if store always redirects. Kept for clarity if store might not.
+    // For this task, the store handles redirection, so router.push('/') here is redundant.
   } catch (err) {
-    // Se a action 'login' lançou um erro, ele será capturado aqui.
-    error.value = 'Email ou senha inválidos.';
+    // The authStore.loginError will be set by the action.
+    // We can set a local error if there's a different kind of error
+    // or if we want to display a generic message not from the store.
+    // However, the primary error display is now through authStore.loginError.
+    // If `throw error` was removed from store, this `err` would be from other issues.
+    // Since `throw error` is kept, `err` here is the one from the store.
+    // We don't need to set local `error.value` if `authStore.loginError` is the source of truth for login failures.
+    // error.value = 'Email ou senha inválidos.'; // This can be removed or kept for non-store related errors.
   }
 };
 </script>
 
 <style scoped>
 /* ... seus estilos ... */
+.error-message { /* Style for the new error message display */
+  color: red;
+  text-align: center;
+  margin-top: 1rem;
+  margin-bottom: 1rem; /* Added for spacing */
+}
 .login-container {
   max-width: 400px;
   margin: 5rem auto;
@@ -57,7 +68,7 @@ const handleLogin = async () => {
 .login-form h2 {
   text-align: center;
 }
-.error {
+.error { /* This is for the local error.value, if still used */
   color: red;
   text-align: center;
   margin-top: 1rem;
