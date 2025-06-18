@@ -61,7 +61,7 @@ const handleFormSubmit = async (userData) => {
     await store.updateUser(userData.id, { name: userData.name, email: userData.email });
   } else {
     // Criar
-    await store.addUser({ name: userData.name, email: userData.email });
+    await store.addUser({ name: userData.name, email: userData.email, password: userData.password });
   }
   if (!store.error) {
     closeForm();
